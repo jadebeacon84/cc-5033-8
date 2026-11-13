@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>水下降噪 · 影院校正台</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='11' fill='%2325d0c0'/></svg>" />
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <span>水下降噪 · 影院校正台</span>
+    <small>temporal denoise / motion-gated fusion</small>
+  </div>
+  <div class="topmeta">
+    <span id="engine-badge" class="badge badge-idle">内核待机</span>
+    <span id="clip-meta" class="muted">未载入片段</span>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="panel controls">
+    <section class="block">
+      <h2>素材</h2>
+      <div id="clip-list" class="clip-list"></div>
+      <label class="field">
+        <span>帧时间窗 ±</span>
+        <input id="radius" type="range" min="0" max="5" step="1" value="2" />
+        <b id="radius-val">2</b>
+      </label>
+      <p class="hint">窗口越大，时间证据越多；边界与镜头切换会自动收缩，缺帧留空档。</p>
+    </section>
+
+    <section class="block">
+      <h2>融合与空间分离控制</h2>
+      <label class="field">
+        <span>时间强度</span>
+        <input id="temporal" type="range" min="0" max="1" step="0.01" value="0.85" />
+        <b id="temporal-val">0.85</b>
+      </label>
+      <label class="field">
+        <span>空间强度</span>
+        <input id="spatial" type="range" min="0" max="1" step="0.01" value="0.35" />
+        <b id="spatial-val">0.35</b>
+      </label>
+      <label class="field">
+        <span>残差门限</span>
+        <input id="maxres" type="range" min="0.02" max="0.3" step="0.005" value="0.12" />
+        <b id="maxres-val">0.12</b>
+      </label>
+      <label class="field">
+        <span>置信度门限</span>
+        <input id="minconf" type="range" min="0" max="1" step="0.01" value="0.25" />
+        <b id="minconf-val">0.25</b>
+      </label>
+      <label class="field">
+        <span>运动模型</span>
+        <select id="motion">
+          <option value="dense">稠密光流</option>
+          <option value="translation">全局平移</option>
+          <option value="off">不平移（仅残差门）</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>σ 倍率</span>
+        <input id="sigscale" type="range" min="0.5" max="2" step="0.05" value="1" />
+        <b id="sigscale-val">1.0</b>
+      </label>
+      <label class="check">
+        <input id="autocuts" type="checkbox" checked />
+        <span>自动检测镜头切换</span>
+      </label>
+      <div class="preset-row" id="presets"></div>
+    </section>
+
+    <section class="block">
+      <h2>执行</h2>
+      <button id="run" class="primary">开始降噪</button>
+      <button id="cancel" class="ghost" disabled>取消</button>
+      <div class="progress"><div id="progress-bar"></div></div>
+      <p id="progress-text" class="muted">待机</p>
+    </section>
+
+    <section class="block">
+      <h2>噪声假设来源</h2>
+      <div id="noise-box" class="kv empty">载入片段后显示</div>
+    </section>
+  </aside>
+
+  <section class="panel viewer">
+    <div class="tabs">
+      <button class="tab active" data-view="compare">对比播放</button>
+      <button class="tab" data-view="motion">运动 / 邻帧 / 残差</button>
+      <button class="tab" data-view="metrics">客观指标</button>
+      <button class="tab" data-view="diag">逐帧诊断</button>
+    </div>
+
+    <div class="view active" id="view-compare">
+      <div class="compare-head">
+        <div class="seg">
+          <button class="segbtn active" data-mode="side">并排</button>
+          <button class="segbtn" data-mode="swipe">拖动分屏</button>
+          <button class="segbtn" data-mode="diff">差异放大</button>
+        </div>
+        <div class="seg" id="streams">
+          <button class="segbtn active" data-stream="output">降噪输出</button>
+          <button class="segbtn" data-stream="input">原始输入</button>
+          <button class="segbtn" data-stream="truth">清晰真值</button>
+        </div>
+      </div>
+      <div class="stage" id="stage">
+        <div class="pane"><img id="img-a" alt="" /><span class="tag" id="tag-a">输入</span></div>
+        <div class="pane"><img id="img-b" alt="" /><span class="tag" id="tag-b">输出</span></div>
+      </div>
+      <div class="playbar">
+        <button id="play" class="iconbtn">▶</button>
+        <input id="scrub" type="range" min="0" max="0" step="1" value="0" />
+        <span id="frame-label" class="mono">--</span>
+        <select id="fps-select" class="mini">
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1× 真实节奏</option>
+          <option value="2">2×</option>
+        </select>
+      </div>
+      <div class="stamps" id="stamps"></div>
+    </div>
+
+    <div class="view" id="view-motion">
+      <div class="motion-grid">
+        <figure><img id="m-motion" /><figcaption>运动场（颜色=方向，亮度=幅度；满亮≈4 px/帧，暗区=无效匹配）</figcaption></figure>
+        <figure><img id="m-valid" /><figcaption>有效区域（黄=可参与融合，黑=不参与）</figcaption></figure>
+        <figure><img id="m-weights" /><figcaption>采用权重（越亮邻居证据越多）</figcaption></figure>
+        <figure><img id="m-residual" /><figcaption>匹配残差放大（残差场基于当前选帧重算）</figcaption></figure>
+      </div>
+      <div class="motion-detail">
+        <div class="mhead">
+          <span class="mono" id="m-frame">帧 --</span>
+          <span id="m-fallback" class="badge">回退: -</span>
+        </div>
+        <table class="cand" id="cand-table"></table>
+        <p class="hint" id="m-note"></p>
+      </div>
+    </div>
+
+    <div class="view" id="view-metrics">
+      <div id="metrics-empty" class="empty">运行后显示。仅对带清晰真值的合成片段计算客观指标。</div>
+      <div id="metrics-body" class="hidden">
+        <div class="metric-grid" id="metric-cards"></div>
+        <div class="chartwrap"><canvas id="metric-chart" height="220"></canvas></div>
+        <div class="truth-note">
+          指标对比的是源片段与真值，不是缩小图片。噪声下降看平坦区 σ，细节保留看细线对比度；
+          若 σ 降了但细节也大幅下降，说明是“涂平”而不是成功降噪。
+        </div>
+      </div>
+    </div>
+
+    <div class="view" id="view-diag">
+      <div id="warn-list" class="warn-list"></div>
+      <div class="tablewrap"><table class="diag" id="diag-table"></table></div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div id="downloads" class="downloads muted">输出未生成</div>
+  <div class="muted mono">时间戳来自源帧 pts；不重排节奏，不填补缺帧。</div>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

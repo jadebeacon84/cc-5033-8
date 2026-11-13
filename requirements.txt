@@ -1,0 +1,10 @@
+numpy>=1.24
+opencv-python-headless>=4.8
+# No pip in the container? ./tools/run_ui.sh vendors these automatically via
+# tools/fetch_deps.py (stdlib only, wheels unpacked into .tools/pylib).
+# Optional; only needed when ffmpeg is not already installed on PATH:
+# imageio-ffmpeg>=0.5
+# Optional; only needed to rebuild web/fonts/*:
+# fonttools>=4.40
+# Optional; only needed to run tests/ (or: python3 tools/fetch_deps.py --test):
+# pytest>=7.4
